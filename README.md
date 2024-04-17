@@ -1,6 +1,6 @@
 # RIPT + SDMM
 ## Introduction
-This repository provides the codes for the paper _**["Self-supervised Learning of Rotation-invariant 3D Point Set Features using Transformer and its Self-distillation"](https://arxiv.org/abs/2308.04725)**_, which is accepted as a journal paper of Computer Vision and Image Understanding (CVIU). 
+This repository provides the official codes (PyTorch implementation) for the paper _**["Self-supervised Learning of Rotation-invariant 3D Point Set Features using Transformer and its Self-distillation"](https://arxiv.org/abs/2308.04725)**. The paper has been accepted as a paper of the Computer Vision and Image Understanding (CVIU) journal. 
 ```
 Takahiko Furuya, Zhoujie Chen, Ryutarou Ohbuchi, Zhenzhong Kuang, Self-supervised Learning of Rotation-invariant 3D Point Set Features using Transformer and its Self-distillation, Computer Vision and Image Understanding (CVIU), to appear.
 ```
