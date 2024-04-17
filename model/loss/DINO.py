@@ -1,0 +1,142 @@
+import sys
+sys.path.append('../')
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import time
+import math
+import dino_utils as du
+
+# based on: https://github.com/facebookresearch/dino/blob/cb711401860da580817918b9167ed73e3eef3dcf/vision_transformer.py#L257
+class DinoHead( nn.Module ) :
+    def __init__( self, args, mode, in_dim ) :
+        super( DinoHead, self ).__init__()
+        out_dim = args.dino_out_dim
+        use_bn = args.dino_use_bn_in_head
+        if( mode == "student" ) :
+            norm_last_layer = args.dino_norm_student_last_layer
+        elif( mode == "teacher") :
+            norm_last_layer = True
+
+        nlayers = args.dino_head_layers
+        hidden_dim = args.dino_hidden_dim
+        bottleneck_dim = args.dino_bottleneck_dim
+
+        # the codes blow are identical to the original codes
+        nlayers = max(nlayers, 1)
+        if nlayers == 1:
+            self.mlp = nn.Linear(in_dim, bottleneck_dim)
+        else:
+            layers = [nn.Linear(in_dim, hidden_dim)]
+            if use_bn:
+                layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.GELU())
+            for _ in range(nlayers - 2):
+                layers.append(nn.Linear(hidden_dim, hidden_dim))
+                if use_bn:
+                    layers.append(nn.BatchNorm1d(hidden_dim))
+                layers.append(nn.GELU())
+            layers.append(nn.Linear(hidden_dim, bottleneck_dim))
+            self.mlp = nn.Sequential(*layers)
+        self.apply(self._init_weights)
+        self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False))
+        self.last_layer.weight_g.data.fill_(1)
+        if norm_last_layer:
+            self.last_layer.weight_g.requires_grad = False
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            du.trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        x = self.mlp(x)
+        x = nn.functional.normalize(x, dim=-1, p=2)
+        x = self.last_layer(x)
+        return x
+
+# based on: https://github.com/facebookresearch/dino/blob/cb711401860da580817918b9167ed73e3eef3dcf/main_dino.py#L363
+class DinoLoss( nn.Module ):
+    def __init__( self, args, center_momentum=0.9 ):
+        super().__init__()
+
+        self.args = args
+
+        out_dim = args.dino_out_dim
+        self.ncrops = 2 + args.mc_num_lcrop
+
+        self.student_temp = args.dino_student_temp
+        self.teacher_temp = args.dino_teacher_temp
+        self.center_momentum = center_momentum
+
+        self.register_buffer( "center", torch.zeros( 1, out_dim ) )
+
+    def prediction_mixup( self, preds, lambdas, inv=False ) :
+        B, C = preds.shape
+        preds_mixed = []
+
+        for i in range( B ) :
+            if( inv == True ) :
+                idx1 = i
+                idx2 = i - 1
+                if( idx2 < 0 ) :
+                    idx2 = B - 1
+            else :
+                idx1 = i
+                idx2 = ( i + 1 ) % B
+
+            p = lambdas[ i ] * preds[ idx1 ] + ( 1.0 - lambdas[ i ] ) * preds[ idx2 ]
+            preds_mixed.append( p.unsqueeze(0) )
+        preds_mixed = torch.cat( preds_mixed, dim=0 )
+        return preds_mixed
+
+    def forward( self, student_output, teacher_output, mixup_lambdas ):
+        """
+        Cross-entropy between softmax outputs of the teacher and student networks.
+        """
+        # the last batch_size rows are prediction vectors for mixed inputs
+        student_mixup_out = student_output[ -self.args.batch_size : ] # mixup outputs
+        student_mixup_out = student_mixup_out / self.student_temp
+
+        # the remaining rows are used for the DINO loss
+        student_out = student_output[ :-self.args.batch_size ] # non-mixup outputs
+        student_out = student_out / self.student_temp
+        student_out = student_out.chunk( self.ncrops )
+
+        # teacher centering and sharpening
+        teacher_out = F.softmax( ( teacher_output - self.center ) / self.teacher_temp, dim=-1)
+        teacher_out = teacher_out.detach().chunk(2)
+
+        # DINO loss
+        total_loss = 0
+        n_loss_terms = 0
+        for iq, q in enumerate( teacher_out ):
+            for v in range( len( student_out ) ):
+                if v == iq:
+                    # we skip cases where student and teacher operate on the same view
+                    continue
+                loss = torch.sum( -q * F.log_softmax( student_out[v], dim=-1 ), dim=-1 )
+                total_loss += loss.mean()
+                n_loss_terms += 1
+        total_loss /= n_loss_terms
+        self.update_center( teacher_output )
+
+        # Mixup loss
+        preds_mixed = self.prediction_mixup( teacher_out[0], mixup_lambdas ) # create pseudo-labels by mixing up predictions generated by from teacher
+        mixup_loss = torch.sum( -preds_mixed * F.log_softmax( student_mixup_out, dim=-1 ), dim=-1 )
+        mixup_loss = mixup_loss.mean()
+        total_loss += self.args.mixup_coeff * mixup_loss
+
+        return total_loss
+
+    @torch.no_grad()
+    def update_center( self, teacher_output ):
+        """
+        Update center used for teacher output.
+        """
+        batch_center = torch.mean( teacher_output, dim=0, keepdim=True )
+
+        # ema update
+        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
