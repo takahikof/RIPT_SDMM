@@ -1,25 +1,25 @@
-correspondences between the dataset names and the file names
+# Correspondences between the dataset names and the file names
 
-[ModelNet10]
-mn10_ops_train.h5
-mn10_ops_test.h5
+## ModelNet10
+training set: mn10_train.h5<br>
+testing set: mn10_test.h5
 
-[ModelNet40]
-mn40_provided_2048pts_withnormal_train.h5
-mn40_provided_2048pts_withnormal_test.h5
+## ModelNet40
+training set: mn40_train.h5<br>
+testing set: mn40_test.h5
 
-[ShapeNet Core55]
-shapenetcore55_ops_train.h5
-shapenetcore55_ops_test.h5
+## ShapeNet Core55
+training set: sn55_train.h5<br>
+testing set: sn55_test.h5
 
-[ScanObjectNN, OBJ_ONLY]
-sonn_withoutbg_2048pts_withnormal_train.h5
-sonn_withoutbg_2048pts_withnormal_test.h5
+## ScanObjectNN (OBJ_ONLY)
+training set: sonn_withoutbg_train.h5<br>
+testing set: sonn_withoutbg_test.h5
 
-[ScanObjectNN, OBJ_BG]
-sonn_withbg_2048pts_withnormal_train.h5
-sonn_withbg_2048pts_withnormal_test.h5
+## ScanObjectNN (OBJ_BG)
+training set: sonn_withbg_train.h5<br>
+testing set: sonn_withbg_test.h5
 
-[ScanObjectNN, PB_T50_RS]
-sonn_pbt50rs_2048pts_withnormal_train.h5
-sonn_pbt50rs_2048pts_withnormal_test.h5
+## ScanObjectNN (PB_T50_RS)
+training set: sonn_pbt50rs_train.h5<br>
+testing set: sonn_pbt50rs_test.h5
